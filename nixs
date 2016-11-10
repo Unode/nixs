@@ -1,0 +1,191 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# A quick nix package search using data from https://nixos.org/nixos/packages.html
+
+import argparse
+import getpass
+import gzip
+import json
+import os
+import re
+import sys
+import time
+import urllib.error
+import urllib.request
+from collections import OrderedDict
+
+
+PACKAGES = "https://nixos.org/nixpkgs/packages.json.gz"
+CACHE = os.path.join(os.environ.get("TMPDIR", "/tmp"), getpass.getuser(), "nixs.cache.json.gz")
+CACHE_ENTRY = "packages"
+TITLES = OrderedDict([
+    ("name", {"subkey": None,
+              "key": "name",
+              "title": "Package name"}),
+    ("attr", {"subkey": None,
+              "key": None,
+              "title": "Attribute name"}),
+    ("meta", {"subkey": "description",
+              "key": "meta",
+              "title": "Description"}),
+])
+
+
+def format_hits(hits, cache):
+    pkg = cache[CACHE_ENTRY]
+
+    key_width = OrderedDict()
+
+    for key in TITLES:
+        key_width[key] = len(TITLES[key]["title"])
+
+    if not hits:
+        sys.stdout.write("No matches\n")
+        return
+
+    output = []
+    header = []
+
+    for key in TITLES:
+        header.append(TITLES[key]["title"])
+
+    # Preprocess to obtain printing widths
+    for hit in hits:
+        if len(hit) > key_width["attr"]:
+            key_width["attr"] = len(hit)
+
+        match = []
+
+        for search in TITLES:
+            key = TITLES[search]["key"]
+
+            if key is None:
+                match.append(hit)
+                continue
+
+            subkey = TITLES[search]["subkey"]
+
+            if subkey is None:
+                text = pkg[hit].get(key, '')
+            else:
+                try:
+                    text = pkg[hit][key][subkey]
+                except KeyError:
+                    text = ''
+                else:
+                    text = text.replace('\n', ' ')
+
+            match.append(text)
+
+            if len(text) > key_width[search]:
+                key_width[search] = len(text)
+
+        output.append(match)
+
+    # Sort alphabetically
+    output.sort()
+
+    # Add adjustment to the width of all texts for readability
+    adjust = 2
+    row_width = []
+
+    for key in key_width:
+        row_width.append(key_width[key] + adjust)
+
+    # Add header to output
+    output.insert(0, header)
+
+    # Print rows
+    for row in output:
+        for elem, size in zip(row, row_width):
+            sys.stdout.write(("{0: <%d}" % size).format(elem))
+        sys.stdout.write("\n")
+
+
+def search_pattern(pattern, cache):
+    pat = re.compile(".*{}.*".format(pattern))
+    matches = []
+    for app in cache[CACHE_ENTRY]:
+        if pat.match(app):
+            matches.append(app)
+            continue
+        else:
+            for search in TITLES:
+                key = TITLES[search]["key"]
+
+                if key is None:
+                    continue
+
+                subkey = TITLES[search]["subkey"]
+
+                if subkey is None:
+                    text = cache[CACHE_ENTRY][app].get(key, '')
+                else:
+                    try:
+                        text = cache[CACHE_ENTRY][app][key][subkey]
+                    except KeyError:
+                        text = ''
+
+                if pat.match(text):
+                    matches.append(app)
+                    continue
+
+    return matches
+
+
+def load_cache():
+    with gzip.open(CACHE, mode='rt') as fh:
+        return json.load(fh)
+
+
+def update_cache(force=False):
+    if not force:
+        age = 6 * 60 * 60  # seconds
+        if os.path.isfile(CACHE):
+            if time.time() - os.stat(CACHE).st_mtime < age:
+                return
+
+    sys.stdout.write("Updating local package cache...")
+    sys.stdout.flush()
+
+    cache_dir = os.path.dirname(CACHE)
+    if not os.path.isdir(cache_dir):
+        os.makedirs(cache_dir)
+
+    try:
+        with open(CACHE, 'wb') as out:
+            fh = urllib.request.urlopen(PACKAGES)
+            out.write(fh.read())
+    except urllib.error.URLError:
+        os.remove(CACHE)
+
+    sys.stdout.write(" DONE\n")
+    sys.stdout.flush()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Quick search of nix packages")
+    parser.add_argument("-u", "--update", action="store_true",
+                        help="Force the update of the local cache")
+    parser.add_argument("-i", "--ignore-age", action="store_true",
+                        help="Ignore the age of the local cache")
+    parser.add_argument("pattern",
+                        help="Pattern to search. A full text search will be performed.")
+    return parser.parse_args()
+
+
+def main():
+    args = parse_args()
+    if not args.ignore_age:
+        update_cache(args.update)
+    cache = load_cache()
+    hits = search_pattern(args.pattern, cache)
+    format_hits(hits, cache)
+
+
+if __name__ == "__main__":
+    main()
+
+# vim: ai sts=4 et sw=4
