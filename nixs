@@ -135,7 +135,7 @@ def search_pattern(pattern, cache):
 
 
 def load_cache():
-    with gzip.open(CACHE, mode='rt') as fh:
+    with gzip.open(CACHE, mode='rt', encoding="utf8") as fh:
         return json.load(fh)
 
 
