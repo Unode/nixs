@@ -15,6 +15,13 @@ import urllib.error
 import urllib.request
 from collections import OrderedDict
 
+# Avoid crashing by forcing output to UTF-8 on systems with a non-UTF8 LOCALE
+if sys.stdout.encoding != "UTF-8":
+    sys.stderr.write("Warning: Your terminal is not configured to use UTF-8.\n")
+    sys.stderr.write("         This may cause problems or garbled characters down the line\n")
+    sys.stderr.write("         Forcing output to use UTF8\n")
+    sys.stdout = open(sys.stdout.fileno(), mode='w', encoding='utf8', buffering=1)
+
 
 PACKAGES = "https://nixos.org/nixpkgs/packages.json.gz"
 CACHE = os.path.join(os.environ.get("TMPDIR", "/tmp"), getpass.getuser(), "nixs.cache.json.gz")
